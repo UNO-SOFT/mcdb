@@ -1,3 +1,7 @@
+// Copyright 2021 Tamás Gulácsi. All rights reserved.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package mcdb_test
 
 import (
@@ -63,13 +67,18 @@ func TestReadWrite(t *testing.T) {
 	if err = it.Err(); err != nil {
 		t.Error(err)
 	}
-	if err = rw.Close(); err != nil {
-		t.Error(err)
-	}
 
 	for i, k := range keys {
 		if k != nil {
 			t.Errorf("%d left out from iteration", i)
 		}
+	}
+
+	if err = rw.Dump(os.Stdout); err != nil {
+		t.Error(err)
+	}
+
+	if err = rw.Close(); err != nil {
+		t.Error(err)
 	}
 }

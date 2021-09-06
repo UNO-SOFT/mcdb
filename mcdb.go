@@ -9,10 +9,12 @@
 package mcdb
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +38,9 @@ func Hash(p []byte) uint32 {
 
 // bucket returns the specific bucket a key must reside in.
 func bucket(key []byte, expC int) int {
+	if expC == 32 {
+		return 0
+	}
 	return int(Hash(key) >> expC)
 }
 
@@ -65,18 +70,18 @@ func NewWriter(dir string, n int) (*Writer, error) {
 			_ = m.Close()
 			return nil, err
 		}
-        if err = os.Chmod(fh.Name(), 0440); err != nil {
-            return nil, err
-        }
+		if err = os.Chmod(fh.Name(), 0440); err != nil {
+			return nil, err
+		}
 		if m.ws[i], err = cdb.NewWriter(fh, Hash); err != nil {
 			_ = m.Close()
 			return nil, err
 		}
 	}
-    if err := os.Chmod(dir, 0550); err != nil {
-        _ = m.Close()
-        return nil, err
-    }
+	if err := os.Chmod(dir, 0550); err != nil {
+		_ = m.Close()
+		return nil, err
+	}
 	return &m, nil
 }
 
@@ -108,11 +113,18 @@ type Reader struct {
 
 // NewReader opens the multiple CDB files for reading.
 func NewReader(dir string) (*Reader, error) {
+	m := Reader{expC: 32}
 	des, err := os.ReadDir(dir)
 	if err != nil && len(des) == 0 {
+		// Hack for one-file "multicdb"
+		if fh, err := mmap.Open(dir); err == nil {
+			if rs, err := cdb.New(fh, Hash); err == nil {
+				m.rs = append(m.rs[:0], rs)
+				return &m, nil
+			}
+		}
 		return nil, err
 	}
-	m := Reader{expC: 32}
 	for _, de := range des {
 		nm := de.Name()
 		if !(strings.HasPrefix(nm, "mcdb-") && strings.HasSuffix(nm, ".cdb")) {
@@ -183,7 +195,25 @@ func (m *Reader) Get(key []byte) ([]byte, error) {
 
 // Iter returns an iterator.
 func (m *Reader) Iter() *Iterator {
+	if m == nil || len(m.rs) == 0 {
+		return nil
+	}
 	return &Iterator{m: m, it: m.rs[0].Iter()}
+}
+
+// Dump all the underlying data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
+func (m *Reader) Dump(w io.Writer) error {
+	bw := bufio.NewWriter(w)
+	it := m.Iter()
+	for it.Next() {
+		if err := dump(bw, it.Key(), it.Value()); err != nil {
+			return err
+		}
+	}
+	if err := it.Err(); err != nil {
+		return err
+	}
+	return bw.Flush()
 }
 
 // Iterator iterates through all keys of all CDB files.
@@ -215,4 +245,36 @@ func (m *Iterator) Next() bool {
 		}
 	}
 	return false
+}
+
+// Dump the current Iterator position data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
+func (m *Iterator) Dump(w io.Writer) error {
+	if err := m.Err(); err != nil {
+		return err
+	}
+	key, val := m.Key(), m.Value()
+	bw := bufio.NewWriterSize(w, len("+65536,65536:->\n")+len(key)+len(val))
+	if err := dump(bw, key, val); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+func dump(bw *bufio.Writer, key, val []byte) error {
+	_, err := fmt.Fprintf(bw, "+%d,%d:", len(key), len(val))
+	if err != nil {
+		return err
+	}
+	if _, err = bw.Write(key); err != nil {
+		return err
+	}
+	if _, err = bw.WriteString("->"); err != nil {
+		return err
+	}
+	if _, err = bw.Write(val); err != nil {
+		return err
+	}
+	if err = bw.WriteByte('\n'); err != nil {
+		return err
+	}
+	return nil
 }
