@@ -65,11 +65,18 @@ func NewWriter(dir string, n int) (*Writer, error) {
 			_ = m.Close()
 			return nil, err
 		}
+        if err = os.Chmod(fh.Name(), 0440); err != nil {
+            return nil, err
+        }
 		if m.ws[i], err = cdb.NewWriter(fh, Hash); err != nil {
 			_ = m.Close()
 			return nil, err
 		}
 	}
+    if err := os.Chmod(dir, 0550); err != nil {
+        _ = m.Close()
+        return nil, err
+    }
 	return &m, nil
 }
 
