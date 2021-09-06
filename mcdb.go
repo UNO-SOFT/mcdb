@@ -278,3 +278,61 @@ func dump(bw *bufio.Writer, key, val []byte) error {
 	}
 	return nil
 }
+
+// Load the Writer from cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
+func (m *Writer) Load(r io.Reader) error {
+	br := bufio.NewReaderSize(r, 1<<20)
+	var key, val []byte
+	for {
+		var err error
+		if key, val, err = load(br, key, val); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		if err = m.Put(key, val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func load(br *bufio.Reader, key, val []byte) ([]byte, []byte, error) {
+	var keyLen, valLen uint32
+	_, err := fmt.Fscanf(br, "+%d,%d:", &keyLen, &valLen)
+	if err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			err = io.EOF
+		}
+		return key, val, err
+	}
+	R := func(key []byte, keyLen int) ([]byte, error) {
+		if cap(key) < keyLen {
+			key = make([]byte, keyLen)
+		} else {
+			key = key[:keyLen]
+		}
+		_, err := io.ReadFull(br, key)
+		return key, err
+	}
+	if key, err = R(key, int(keyLen)); err != nil {
+		return key, val, err
+	}
+	var a [2]byte
+	if _, err = io.ReadFull(br, a[:]); err != nil {
+		return key, val, err
+	} else if !(a[0] == '-' && a[1] == '>') {
+		return key, val, fmt.Errorf("wanted ->, got %q", a[:])
+	}
+	if val, err = R(val, int(valLen)); err != nil {
+		return key, val, err
+	}
+	if b, err := br.ReadByte(); err != nil {
+		return key, val, err
+	} else if b != '\n' {
+		return key, val, fmt.Errorf("wanted \\n, got %q", []byte{b})
+	}
+
+	return key, val, nil
+}
