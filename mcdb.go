@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	//"log"
 	"hash"
 	"hash/fnv"
 	"io"
@@ -39,6 +40,7 @@ func fnvHash(p []byte) uint32 {
 
 // bucket returns the specific bucket a key must reside in.
 func bucket(h HashFunc, key []byte, expC int) int {
+	//log.Printf("bucket(%p, %s, %d): %d", h, key, expC, h(key)>>expC)
 	if expC == 32 {
 		return 0
 	}
@@ -143,12 +145,8 @@ func NewReader(dir string) (*Reader, error) {
 		var u1, u2 uint32
 		var v Version
 		var err error
-		if version == 0 || strings.HasPrefix(nm, "mcdb-v") {
+		if strings.HasPrefix(nm, "mcdb-v") {
 			_, err = fmt.Sscanf(de.Name(), FileName, &v, &u1, &u2)
-			if version != 0 && version != v {
-				return nil, fmt.Errorf("Version mismatch: was %d, now %d (%q)", version, v, de.Name())
-			}
-			version = v
 		} else {
 			_, err = fmt.Sscanf(de.Name(), FileNameV0, &u1, &u2)
 		}
@@ -160,6 +158,7 @@ func NewReader(dir string) (*Reader, error) {
 			for i := 1; i < len(m.rs); i <<= 1 {
 				m.expC--
 			}
+            version = v
 			switch version {
 			case 0:
 				m.bucketHash, m.cdbHash = fnvHash, fnvHash
@@ -168,7 +167,9 @@ func NewReader(dir string) (*Reader, error) {
 			default:
 				return nil, fmt.Errorf("Unknown version %d", version)
 			}
-		}
+		} else if version != v {
+			return nil, fmt.Errorf("Version mismatch: was %d, now %d (%q)", version, v, de.Name())
+        }
 		if u1 != uint32(len(m.rs)) {
 			_ = m.Close()
 			return nil, fmt.Errorf("%s: first number should be the same for all files", de.Name())
@@ -196,7 +197,7 @@ func NewReader(dir string) (*Reader, error) {
 			return nil, fmt.Errorf(FileName+" not found", version, len(m.rs), i)
 		}
 	}
-	//log.Println("rs:", len(m.rs), "expC:", m.expC)
+	//log.Println("rs:", len(m.rs), "expC:", m.expC, "version:", version, "bucketHash:", m.bucketHash, "cdbHash:", m.cdbHash)
 	return &m, nil
 }
 
