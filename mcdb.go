@@ -10,6 +10,7 @@ package mcdb
 
 import (
 	"bufio"
+    "context"
 	"errors"
 	"fmt"
 	//"log"
@@ -236,9 +237,17 @@ func (m *Reader) Iter() *Iterator {
 
 // Dump all the underlying data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
 func (m *Reader) Dump(w io.Writer) error {
+    return m.DumpContext(context.Background(), w)
+}
+
+// DumpContext dumps all the underlying data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
+func (m *Reader) DumpContext(ctx context.Context, w io.Writer) error {
 	bw := bufio.NewWriter(w)
 	it := m.Iter()
 	for it.Next() {
+        if err := ctx.Err(); err != nil {
+            return err
+        }
 		if err := dump(bw, it.Key(), it.Value()); err != nil {
 			return err
 		}
@@ -311,13 +320,20 @@ func dump(bw *bufio.Writer, key, val []byte) error {
 	}
 	return nil
 }
-
 // Load the Writer from cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
 func (m *Writer) Load(r io.Reader) error {
+    return m.LoadContext(context.Background(), r)
+}
+
+// LoadContext the Writer from cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
+func (m *Writer) LoadContext(ctx context.Context, r io.Reader) error {
 	br := bufio.NewReaderSize(r, 1<<20)
 	var key, val []byte
 	for {
-		var err error
+        err := ctx.Err()
+        if err != nil {
+            return err
+        }
 		if key, val, err = load(br, key, val); err != nil {
 			if errors.Is(err, io.EOF) {
 				break

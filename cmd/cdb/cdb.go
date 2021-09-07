@@ -30,7 +30,7 @@ func Main() error {
 				return err
 			}
 			defer cr.Close()
-			return cr.Dump(os.Stdout)
+			return cr.DumpContext(ctx, os.Stdout)
 		},
 	}
 
@@ -43,7 +43,7 @@ func Main() error {
 				return err
 			}
 			defer cw.Close()
-			if err := cw.Load(os.Stdin); err != nil {
+			if err := cw.LoadContext(ctx, os.Stdin); err != nil {
 				return err
 			}
 			return cw.Close()
