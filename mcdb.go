@@ -10,7 +10,7 @@ package mcdb
 
 import (
 	"bufio"
-    "context"
+	"context"
 	"errors"
 	"fmt"
 	//"log"
@@ -67,6 +67,22 @@ func NewWriter(dir string, n int) (*Writer, error) {
 	}
 	m := Writer{expC: expC, ws: make([]*cdb.Writer, n2), bucketHash: fnvHash}
 	//log.Println("n:", n, "expC:", expC)
+	if n == 1 {
+		fh, err := os.Create(dir)
+		if err != nil {
+			_ = m.Close()
+			return nil, err
+		}
+		if err = os.Chmod(fh.Name(), 0440); err != nil {
+			return nil, err
+		}
+		if m.ws[0], err = cdb.NewWriter(fh, nil); err != nil {
+			_ = m.Close()
+			return nil, err
+		}
+		return &m, nil
+	}
+
 	base := filepath.Join(dir, FileName)
 	_ = os.MkdirAll(dir, 0750)
 	for i := range m.ws {
@@ -159,7 +175,7 @@ func NewReader(dir string) (*Reader, error) {
 			for i := 1; i < len(m.rs); i <<= 1 {
 				m.expC--
 			}
-            version = v
+			version = v
 			switch version {
 			case 0:
 				m.bucketHash, m.cdbHash = fnvHash, fnvHash
@@ -170,7 +186,7 @@ func NewReader(dir string) (*Reader, error) {
 			}
 		} else if version != v {
 			return nil, fmt.Errorf("Version mismatch: was %d, now %d (%q)", version, v, de.Name())
-        }
+		}
 		if u1 != uint32(len(m.rs)) {
 			_ = m.Close()
 			return nil, fmt.Errorf("%s: first number should be the same for all files", de.Name())
@@ -237,7 +253,7 @@ func (m *Reader) Iter() *Iterator {
 
 // Dump all the underlying data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
 func (m *Reader) Dump(w io.Writer) error {
-    return m.DumpContext(context.Background(), w)
+	return m.DumpContext(context.Background(), w)
 }
 
 // DumpContext dumps all the underlying data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
@@ -245,9 +261,9 @@ func (m *Reader) DumpContext(ctx context.Context, w io.Writer) error {
 	bw := bufio.NewWriter(w)
 	it := m.Iter()
 	for it.Next() {
-        if err := ctx.Err(); err != nil {
-            return err
-        }
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := dump(bw, it.Key(), it.Value()); err != nil {
 			return err
 		}
@@ -320,9 +336,10 @@ func dump(bw *bufio.Writer, key, val []byte) error {
 	}
 	return nil
 }
+
 // Load the Writer from cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
 func (m *Writer) Load(r io.Reader) error {
-    return m.LoadContext(context.Background(), r)
+	return m.LoadContext(context.Background(), r)
 }
 
 // LoadContext the Writer from cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
@@ -330,10 +347,10 @@ func (m *Writer) LoadContext(ctx context.Context, r io.Reader) error {
 	br := bufio.NewReaderSize(r, 1<<20)
 	var key, val []byte
 	for {
-        err := ctx.Err()
-        if err != nil {
-            return err
-        }
+		err := ctx.Err()
+		if err != nil {
+			return err
+		}
 		if key, val, err = load(br, key, val); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
