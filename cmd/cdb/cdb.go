@@ -35,7 +35,7 @@ func Main() error {
 	}
 
 	fs := flag.NewFlagSet("make", flag.ContinueOnError)
-	flagMakeCount := fs.Int("tables", 2, "number of tables to create")
+	flagMakeCount := fs.Int("tables", 1, "number of tables to create")
 	makeCmd := ffcli.Command{Name: "make", FlagSet: fs,
 		Exec: func(ctx context.Context, args []string) error {
 			cw, err := mcdb.NewWriter(args[0], *flagMakeCount)
