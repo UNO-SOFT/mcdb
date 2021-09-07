@@ -12,3 +12,10 @@ The size limit is too low nowadays.
 
 ## CLI
 ./cmd/cdb is a command-line program that can dump in cdbmake-format, and load from that format.
+
+## Versions
+### v0 - no versioning
+Uses FNV for bucket distribution, and FNV for CDB hashing.
+
+### v1 - version in filename
+Uses FNV for bucket distribution, and the default CDB hashing.

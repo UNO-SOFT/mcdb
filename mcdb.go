@@ -24,30 +24,32 @@ import (
 	"golang.org/x/exp/mmap"
 )
 
-var hashesPool = sync.Pool{New: func() interface{} { return fnv.New32() }}
+type HashFunc func([]byte) uint32
 
-// Hash is the used hash. FNV-1 at the moment.
-func Hash(p []byte) uint32 {
-	hsh := hashesPool.Get().(hash.Hash32)
+var fnvHashesPool = sync.Pool{New: func() interface{} { return fnv.New32() }}
+
+func fnvHash(p []byte) uint32 {
+	hsh := fnvHashesPool.Get().(hash.Hash32)
 	_, _ = hsh.Write(p)
 	res := hsh.Sum32()
 	hsh.Reset()
-	hashesPool.Put(hsh)
+	fnvHashesPool.Put(hsh)
 	return res
 }
 
 // bucket returns the specific bucket a key must reside in.
-func bucket(key []byte, expC int) int {
+func bucket(h HashFunc, key []byte, expC int) int {
 	if expC == 32 {
 		return 0
 	}
-	return int(Hash(key) >> expC)
+	return int(h(key) >> expC)
 }
 
 // Writer is the writer. It needs the number of tables beforehand.
 type Writer struct {
-	ws   []*cdb.Writer
-	expC int
+	ws         []*cdb.Writer
+	bucketHash HashFunc
+	expC       int
 }
 
 // NewWriter returns a new Writer.
@@ -60,12 +62,12 @@ func NewWriter(dir string, n int) (*Writer, error) {
 	for n2 = 1; n2 < n; n2 <<= 1 {
 		expC--
 	}
-	m := Writer{expC: expC, ws: make([]*cdb.Writer, n2)}
+	m := Writer{expC: expC, ws: make([]*cdb.Writer, n2), bucketHash: fnvHash}
 	//log.Println("n:", n, "expC:", expC)
 	base := filepath.Join(dir, FileName)
 	_ = os.MkdirAll(dir, 0750)
 	for i := range m.ws {
-		fh, err := os.Create(fmt.Sprintf(base, n2, i))
+		fh, err := os.Create(fmt.Sprintf(base, DefaultVersion, n2, i))
 		if err != nil {
 			_ = m.Close()
 			return nil, err
@@ -73,7 +75,7 @@ func NewWriter(dir string, n int) (*Writer, error) {
 		if err = os.Chmod(fh.Name(), 0440); err != nil {
 			return nil, err
 		}
-		if m.ws[i], err = cdb.NewWriter(fh, Hash); err != nil {
+		if m.ws[i], err = cdb.NewWriter(fh, nil); err != nil {
 			_ = m.Close()
 			return nil, err
 		}
@@ -102,14 +104,21 @@ func (m *Writer) Close() error {
 
 // Put the key into one of the underlying writers.
 func (m *Writer) Put(key, val []byte) error {
-	return m.ws[bucket(key, m.expC)].Put(key, val)
+	return m.ws[bucket(m.bucketHash, key, m.expC)].Put(key, val)
 }
 
 // Reader is a reader for multiple CDB files.
 type Reader struct {
-	rs   []*cdb.CDB
-	expC int
+	rs                  []*cdb.CDB
+	bucketHash, cdbHash HashFunc
+	expC                int
 }
+
+type Version uint8
+
+func (v Version) String() string { return fmt.Sprintf("v%d", v) }
+
+const DefaultVersion = Version(1)
 
 // NewReader opens the multiple CDB files for reading.
 func NewReader(dir string) (*Reader, error) {
@@ -118,26 +127,46 @@ func NewReader(dir string) (*Reader, error) {
 	if err != nil && len(des) == 0 {
 		// Hack for one-file "multicdb"
 		if fh, err := mmap.Open(dir); err == nil {
-			if rs, err := cdb.New(fh, Hash); err == nil {
+			if rs, err := cdb.New(fh, nil); err == nil {
 				m.rs = append(m.rs[:0], rs)
 				return &m, nil
 			}
 		}
 		return nil, err
 	}
+	var version Version
 	for _, de := range des {
 		nm := de.Name()
 		if !(strings.HasPrefix(nm, "mcdb-") && strings.HasSuffix(nm, ".cdb")) {
 			continue
 		}
 		var u1, u2 uint32
-		if _, err := fmt.Sscanf(de.Name(), FileName, &u1, &u2); err != nil {
+		var v Version
+		var err error
+		if version == 0 || strings.HasPrefix(nm, "mcdb-v") {
+			_, err = fmt.Sscanf(de.Name(), FileName, &v, &u1, &u2)
+			if version != 0 && version != v {
+				return nil, fmt.Errorf("Version mismatch: was %d, now %d (%q)", version, v, de.Name())
+			}
+			version = v
+		} else {
+			_, err = fmt.Sscanf(de.Name(), FileNameV0, &u1, &u2)
+		}
+		if err != nil {
 			return nil, fmt.Errorf("%s: %w", de.Name(), err)
 		}
 		if m.rs == nil {
 			m.rs = make([]*cdb.CDB, int(u1))
 			for i := 1; i < len(m.rs); i <<= 1 {
 				m.expC--
+			}
+			switch version {
+			case 0:
+				m.bucketHash, m.cdbHash = fnvHash, fnvHash
+			case 1:
+				m.bucketHash, m.cdbHash = fnvHash, nil
+			default:
+				return nil, fmt.Errorf("Unknown version %d", version)
 			}
 		}
 		if u1 != uint32(len(m.rs)) {
@@ -153,7 +182,7 @@ func NewReader(dir string) (*Reader, error) {
 			_ = m.Close()
 			return nil, err
 		}
-		if m.rs[int(u2)], err = cdb.New(fh, Hash); err != nil {
+		if m.rs[int(u2)], err = cdb.New(fh, m.cdbHash); err != nil {
 			_ = m.Close()
 			return nil, err
 		}
@@ -164,14 +193,17 @@ func NewReader(dir string) (*Reader, error) {
 	for i, r := range m.rs {
 		if r == nil {
 			_ = m.Close()
-			return nil, fmt.Errorf(FileName+" not found", len(m.rs), i)
+			return nil, fmt.Errorf(FileName+" not found", version, len(m.rs), i)
 		}
 	}
 	//log.Println("rs:", len(m.rs), "expC:", m.expC)
 	return &m, nil
 }
 
-const FileName = "mcdb-%d,%b.cdb"
+const (
+	FileName   = "mcdb-v%d-%d,%b.cdb"
+	FileNameV0 = "mcdb-%d,%b.cdb"
+)
 
 // Close the underlying readers.
 func (m *Reader) Close() error {
@@ -190,7 +222,7 @@ func (m *Reader) Close() error {
 
 // Get the key from the reader.
 func (m *Reader) Get(key []byte) ([]byte, error) {
-	return m.rs[bucket(key, m.expC)].Get(key)
+	return m.rs[bucket(m.bucketHash, key, m.expC)].Get(key)
 }
 
 // Iter returns an iterator.

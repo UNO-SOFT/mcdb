@@ -37,6 +37,9 @@ func TestReadWrite(t *testing.T) {
 		t.Error(err)
 	}
 
+	b, _ := exec.Command("ls", "-l", dn).Output()
+	t.Log(string(b))
+
 	rw, err := mcdb.NewReader(dn)
 	if err != nil {
 		t.Fatal(err)
