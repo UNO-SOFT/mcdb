@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/UNO-SOFT/mcdb"
@@ -27,15 +28,20 @@ func TestGrow(t *testing.T) {
 	defer cw.Close()
 
 	var key [1 << 20]byte
-	var val [768 << 20]byte
+	val := make([]byte, 16<<20)
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 10_000; i++ {
 		_ = strconv.AppendUint(key[:0], uint64(i), 10)
 		if err = cw.Put(key[:], val[:]); err != nil {
+			if strings.Contains(err.Error(), "no space left on device") {
+				t.Skip(err)
+			}
 			t.Fatal(err)
 		}
-		b, _ := exec.Command("ls", "-l", dn).Output()
-		t.Log(string(b))
+		if i%1000 == 0 {
+			b, _ := exec.Command("ls", "-l", dn).Output()
+			t.Log(string(b))
+		}
 	}
 }
 

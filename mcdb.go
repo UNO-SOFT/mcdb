@@ -95,6 +95,7 @@ func NewWriter(dir string, n int) (*Writer, error) {
 	}
 	base := filepath.Join(dir, pat)
 	_ = os.MkdirAll(dir, 0750)
+	_ = os.Chmod(dir, 0750)
 	for i := range m.ws {
 		fh, err := os.Create(fmt.Sprintf(base, DefaultVersion, n2, i))
 		if err != nil {
@@ -145,7 +146,8 @@ func (m *Writer) Put(key, val []byte) error {
 	if err == nil || !m.canGrow || !errors.Is(err, cdb.ErrTooMuchData) {
 		return err
 	}
-	//log.Println("Grow", len(m.ws))
+
+	// Grow by copying the old to 2x tables.
 	for _, w := range m.ws {
 		if err := w.Close(); err != nil {
 			return err
@@ -153,17 +155,17 @@ func (m *Writer) Put(key, val []byte) error {
 	}
 	r, err := NewReader(m.path)
 	if err != nil {
-		return err
+		return fmt.Errorf("read %q: %w", m.path, err)
 	}
 	defer r.Close()
 	m2, err := NewWriter(m.path, 2*len(m.ws))
 	if err != nil {
-		return err
+		return fmt.Errorf("create (%d) %q: %w", 2*len(m.ws), m.path, err)
 	}
 	m2.canGrow = true
 
 	if err := m2.Put(key, val); err != nil {
-		return err
+		return fmt.Errorf("put %q: %w", key, err)
 	}
 	it := r.Iter()
 	for it.Next() {
@@ -172,7 +174,7 @@ func (m *Writer) Put(key, val []byte) error {
 		}
 	}
 	if err = it.Err(); err != nil {
-		return err
+		return fmt.Errorf("iterate: %w", err)
 	}
 	for _, w := range m.ws {
 		_ = os.Remove(w.fileName)
