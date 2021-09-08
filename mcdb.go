@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	//"log"
 	"hash"
 	"hash/fnv"
@@ -51,6 +52,7 @@ func bucket(h HashFunc, key []byte, expC int) int {
 // Writer is the writer. It needs the number of tables beforehand.
 type Writer struct {
 	ws         []*cdb.Writer
+	path       string
 	bucketHash HashFunc
 	expC       int
 }
@@ -65,15 +67,12 @@ func NewWriter(dir string, n int) (*Writer, error) {
 	for n2 = 1; n2 < n; n2 <<= 1 {
 		expC--
 	}
-	m := Writer{expC: expC, ws: make([]*cdb.Writer, n2), bucketHash: fnvHash}
+	m := Writer{expC: expC, ws: make([]*cdb.Writer, n2), bucketHash: fnvHash, path: dir}
 	//log.Println("n:", n, "expC:", expC)
 	if n == 1 {
 		fh, err := os.Create(dir)
 		if err != nil {
 			_ = m.Close()
-			return nil, err
-		}
-		if err = os.Chmod(fh.Name(), 0440); err != nil {
 			return nil, err
 		}
 		if m.ws[0], err = cdb.NewWriter(fh, nil); err != nil {
@@ -91,17 +90,10 @@ func NewWriter(dir string, n int) (*Writer, error) {
 			_ = m.Close()
 			return nil, err
 		}
-		if err = os.Chmod(fh.Name(), 0440); err != nil {
-			return nil, err
-		}
 		if m.ws[i], err = cdb.NewWriter(fh, nil); err != nil {
 			_ = m.Close()
 			return nil, err
 		}
-	}
-	if err := os.Chmod(dir, 0550); err != nil {
-		_ = m.Close()
-		return nil, err
 	}
 	return &m, nil
 }
@@ -117,6 +109,20 @@ func (m *Writer) Close() error {
 		if w != nil {
 			_ = w.Close()
 		}
+	}
+	if fi, err := os.Stat(m.path); err != nil {
+		return err
+	} else if fi.Mode().IsDir() {
+		des, _ := os.ReadDir(m.path)
+		for _, de := range des {
+			nm := de.Name()
+			if strings.HasPrefix(nm, "mcdb-") && strings.HasSuffix(nm, ".cdb") {
+				_ = os.Chmod(filepath.Join(m.path, nm), 0440)
+			}
+		}
+		_ = os.Chmod(m.path, 0550)
+	} else {
+		_ = os.Chmod(m.path, 0440)
 	}
 	return nil
 }
