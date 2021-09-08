@@ -4,7 +4,8 @@ It wraps github.com/colinmarc/cdb
 (See the original cdb specification and C implementation by D. J. Bernstein at http://cr.yp.to/cdb.html)
 to hide the 4GiB size limit.
 
-The database(s) can be written only once, and you must set the number of tables to use beforehand.
+The database(s) can be written only once, and you must set the number of tables to use beforehand,
+or use the automatic grow facility (see Writer.Put).
 
 ## Rationale
 CDB is fast and very simple. For read-only access, it's ideal.

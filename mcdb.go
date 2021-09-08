@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	//"log"
 	"hash"
@@ -51,38 +52,48 @@ func bucket(h HashFunc, key []byte, expC int) int {
 
 // Writer is the writer. It needs the number of tables beforehand.
 type Writer struct {
-	ws         []*cdb.Writer
+	ws         []cdbWriter
 	path       string
 	bucketHash HashFunc
 	expC       int
+	canGrow    bool
+}
+
+type cdbWriter struct {
+	*cdb.Writer
+	fileName string
 }
 
 // NewWriter returns a new Writer.
 //
 // The next power-of-two number of tables are created, so for example
 // with n=3, 4 tables are created, containing maximum 16GiB of data.
+//
+// If n<=0 then automatic growing is enabled, with the starting number of tables being abs(n)
 func NewWriter(dir string, n int) (*Writer, error) {
+	canGrow := n <= 0
+	if n == 0 {
+		n = 2
+	} else if n < 0 {
+		n = -n
+	}
 	var n2 int
 	expC := 32
 	for n2 = 1; n2 < n; n2 <<= 1 {
 		expC--
 	}
-	m := Writer{expC: expC, ws: make([]*cdb.Writer, n2), bucketHash: fnvHash, path: dir}
-	//log.Println("n:", n, "expC:", expC)
-	if n == 1 {
-		fh, err := os.Create(dir)
-		if err != nil {
-			_ = m.Close()
-			return nil, err
-		}
-		if m.ws[0], err = cdb.NewWriter(fh, nil); err != nil {
-			_ = m.Close()
-			return nil, err
-		}
-		return &m, nil
+	m := Writer{
+		expC: expC, canGrow: canGrow, path: dir,
+		bucketHash: fnvHash,
+		ws:         make([]cdbWriter, n2),
 	}
+	//log.Println("n:", n, "expC:", expC)
 
-	base := filepath.Join(dir, FileName)
+	pat := FileName
+	if i := strings.Index(pat, ",%b."); i >= 0 {
+		pat = pat[:i+2] + "0" + strconv.Itoa(32-m.expC+1) + pat[i+2:]
+	}
+	base := filepath.Join(dir, pat)
 	_ = os.MkdirAll(dir, 0750)
 	for i := range m.ws {
 		fh, err := os.Create(fmt.Sprintf(base, DefaultVersion, n2, i))
@@ -90,10 +101,11 @@ func NewWriter(dir string, n int) (*Writer, error) {
 			_ = m.Close()
 			return nil, err
 		}
-		if m.ws[i], err = cdb.NewWriter(fh, nil); err != nil {
+		if m.ws[i].Writer, err = cdb.NewWriter(fh, nil); err != nil {
 			_ = m.Close()
 			return nil, err
 		}
+		m.ws[i].fileName = fh.Name()
 	}
 	return &m, nil
 }
@@ -106,7 +118,7 @@ func (m *Writer) Close() error {
 	ws := m.ws
 	m.ws = nil
 	for _, w := range ws {
-		if w != nil {
+		if w.Writer != nil {
 			_ = w.Close()
 		}
 	}
@@ -129,7 +141,45 @@ func (m *Writer) Close() error {
 
 // Put the key into one of the underlying writers.
 func (m *Writer) Put(key, val []byte) error {
-	return m.ws[bucket(m.bucketHash, key, m.expC)].Put(key, val)
+	err := m.ws[bucket(m.bucketHash, key, m.expC)].Put(key, val)
+	if err == nil || !m.canGrow || !errors.Is(err, cdb.ErrTooMuchData) {
+		return err
+	}
+	//log.Println("Grow", len(m.ws))
+	for _, w := range m.ws {
+		if err := w.Close(); err != nil {
+			return err
+		}
+	}
+	r, err := NewReader(m.path)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	m2, err := NewWriter(m.path, 2*len(m.ws))
+	if err != nil {
+		return err
+	}
+	m2.canGrow = true
+
+	if err := m2.Put(key, val); err != nil {
+		return err
+	}
+	it := r.Iter()
+	for it.Next() {
+		if err := m2.Put(it.Key(), it.Value()); err != nil {
+			return err
+		}
+	}
+	if err = it.Err(); err != nil {
+		return err
+	}
+	for _, w := range m.ws {
+		_ = os.Remove(w.fileName)
+	}
+	m.Close()
+	*m = *m2
+	return nil
 }
 
 // Reader is a reader for multiple CDB files.

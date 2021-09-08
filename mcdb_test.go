@@ -8,10 +8,36 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"strconv"
 	"testing"
 
 	"github.com/UNO-SOFT/mcdb"
 )
+
+func TestGrow(t *testing.T) {
+	dn, err := os.MkdirTemp("", "mcdb-test.cdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer removeAll(dn)
+	cw, err := mcdb.NewWriter(dn, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cw.Close()
+
+	var key [1 << 20]byte
+	var val [768 << 20]byte
+
+	for i := 0; i < 10; i++ {
+		_ = strconv.AppendUint(key[:0], uint64(i), 10)
+		if err = cw.Put(key[:], val[:]); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := exec.Command("ls", "-l", dn).Output()
+		t.Log(string(b))
+	}
+}
 
 func TestReadWrite(t *testing.T) {
 	dn, err := os.MkdirTemp("", "mcdb-test.cdb")
