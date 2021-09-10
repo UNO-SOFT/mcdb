@@ -141,6 +141,11 @@ func (m *Writer) Close() error {
 }
 
 // Put the key into one of the underlying writers.
+//
+// If the amount of data written would exceed the limit, and the auto-growing is disabled,
+// then Put returns ErrTooMuchData.
+//
+// When growing, the number of tables doubles, and all data is copied.
 func (m *Writer) Put(key, val []byte) error {
 	err := m.ws[bucket(m.bucketHash, key, m.expC)].Put(key, val)
 	if err == nil || !m.canGrow || !errors.Is(err, cdb.ErrTooMuchData) {
@@ -296,7 +301,7 @@ func (m *Reader) Close() error {
 	return nil
 }
 
-// Get the key from the reader.
+// Get returns the value for a given key, or nil if it can't be found.
 func (m *Reader) Get(key []byte) ([]byte, error) {
 	return m.rs[bucket(m.bucketHash, key, m.expC)].Get(key)
 }
@@ -349,6 +354,10 @@ func (m *Iterator) Key() []byte { return m.it.Key() }
 func (m *Iterator) Value() []byte { return m.it.Value() }
 
 // Next advances the iterator, if possible.
+//
+// It reads the next key/value pair and advances the iterator one record.
+// It returns false when the scan stops, either by reaching the end of the database or an error.
+// After Next returns false, the Err method will return any error that occurred while iterating.
 func (m *Iterator) Next() bool {
 	if m.it.Next() {
 		return true
