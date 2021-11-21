@@ -5,8 +5,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -30,7 +32,23 @@ func Main() error {
 				return err
 			}
 			defer cr.Close()
-			return cr.DumpContext(ctx, os.Stdout)
+			if len(args) == 1 {
+				return cr.DumpContext(ctx, os.Stdout)
+			}
+
+			bw := bufio.NewWriter(os.Stdout)
+			defer bw.Flush()
+			for _, k := range args[1:] {
+				key := []byte(k)
+				val, err := cr.Get(key)
+				if err != nil {
+					return fmt.Errorf("%q: %w", k, err)
+				}
+				if err := mcdb.Dump(bw, key, val); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
 

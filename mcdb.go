@@ -327,7 +327,7 @@ func (m *Reader) DumpContext(ctx context.Context, w io.Writer) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := dump(bw, it.Key(), it.Value()); err != nil {
+		if err := Dump(bw, it.Key(), it.Value()); err != nil {
 			return err
 		}
 	}
@@ -379,12 +379,14 @@ func (m *Iterator) Dump(w io.Writer) error {
 	}
 	key, val := m.Key(), m.Value()
 	bw := bufio.NewWriterSize(w, len("+65536,65536:->\n")+len(key)+len(val))
-	if err := dump(bw, key, val); err != nil {
+	if err := Dump(bw, key, val); err != nil {
 		return err
 	}
 	return bw.Flush()
 }
-func dump(bw *bufio.Writer, key, val []byte) error {
+
+// Dump the given data key, value pair in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
+func Dump(bw *bufio.Writer, key, val []byte) error {
 	_, err := fmt.Fprintf(bw, "+%d,%d:", len(key), len(val))
 	if err != nil {
 		return err
@@ -418,7 +420,7 @@ func (m *Writer) LoadContext(ctx context.Context, r io.Reader) error {
 		if err != nil {
 			return err
 		}
-		if key, val, err = load(br, key, val); err != nil {
+		if key, val, err = Parse(br, key, val); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -431,7 +433,8 @@ func (m *Writer) LoadContext(ctx context.Context, r io.Reader) error {
 	return nil
 }
 
-func load(br *bufio.Reader, key, val []byte) ([]byte, []byte, error) {
+// Parse one key,value pair from the bufio.Reader of cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
+func Parse(br *bufio.Reader, key, val []byte) ([]byte, []byte, error) {
 	var keyLen, valLen uint32
 	_, err := fmt.Fscanf(br, "+%d,%d:", &keyLen, &valLen)
 	if err != nil {
