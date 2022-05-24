@@ -1,4 +1,4 @@
-// Copyright 2021 Tamás Gulácsi. All rights reserved.
+// Copyright 2021, 2022 Tamás Gulácsi. All rights reserved.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -10,6 +10,7 @@ package mcdb
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -52,6 +53,7 @@ func bucket(h HashFunc, key []byte, expC int) int {
 
 // Writer is the writer. It needs the number of tables beforehand.
 type Writer struct {
+	Config
 	ws         []cdbWriter
 	path       string
 	bucketHash HashFunc
@@ -168,6 +170,7 @@ func (m *Writer) Put(key, val []byte) error {
 		return fmt.Errorf("create (%d) %q: %w", 2*len(m.ws), m.path, err)
 	}
 	m2.canGrow = true
+	m2.Config = m.Config
 
 	if err := m2.Put(key, val); err != nil {
 		return fmt.Errorf("put %q: %w", key, err)
@@ -191,6 +194,7 @@ func (m *Writer) Put(key, val []byte) error {
 
 // Reader is a reader for multiple CDB files.
 type Reader struct {
+	Config
 	rs                  []*cdb.CDB
 	bucketHash, cdbHash HashFunc
 	expC                int
@@ -315,27 +319,21 @@ func (m *Reader) Iter() *Iterator {
 }
 
 // Dump all the underlying data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
-func (m *Reader) Dump(w io.Writer, opts ...Option) error {
-	return m.DumpContext(context.Background(), w, opts...)
+func (m *Reader) Dump(w io.Writer) error {
+	return m.DumpContext(context.Background(), w)
 }
 
 // DumpContext dumps all the underlying data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
-func (m *Reader) DumpContext(ctx context.Context, w io.Writer, opts ...Option) error {
+func (m *Reader) DumpContext(ctx context.Context, w io.Writer) error {
 	bw := bufio.NewWriter(w)
 	defer func() { _ = bw.Flush() }()
+	dump := m.Config.dumpFunc()
 	it := m.Iter()
-	cfg := makeConfig(opts)
 	for it.Next() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var err error
-		if cfg.OnlyKeys {
-			err = cfg.Dump(bw, it.Key(), nil)
-		} else {
-			err = cfg.Dump(bw, it.Key(), it.Value())
-		}
-		if err != nil {
+		if err := dump(bw, it); err != nil {
 			return err
 		}
 	}
@@ -343,6 +341,36 @@ func (m *Reader) DumpContext(ctx context.Context, w io.Writer, opts ...Option) e
 		return err
 	}
 	return bw.Flush()
+}
+
+type kver interface {
+	Key() []byte
+	Value() []byte
+}
+
+func (cfg Config) dumpFunc() func(bw *bufio.Writer, kv kver) error {
+	if cfg.Simple {
+		if cfg.OnlyKeys {
+			return func(bw *bufio.Writer, kv kver) error {
+				_, _ = bw.Write(kv.Key())
+				return bw.WriteByte('\n')
+			}
+		}
+		return func(bw *bufio.Writer, kv kver) error {
+			_, _ = bw.Write(kv.Key())
+			_ = bw.WriteByte('\t')
+			_, _ = bw.Write(kv.Value())
+			return bw.WriteByte('\n')
+		}
+	}
+	if cfg.OnlyKeys {
+		return func(bw *bufio.Writer, kv kver) error {
+			return DumpKey(bw, kv.Key())
+		}
+	}
+	return func(bw *bufio.Writer, kv kver) error {
+		return Dump(bw, kv.Key(), kv.Value())
+	}
 }
 
 // Iterator iterates through all keys of all CDB files.
@@ -381,20 +409,33 @@ func (m *Iterator) Next() bool {
 }
 
 // Dump the current Iterator position data in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
-func (m *Iterator) Dump(w io.Writer, opts ...Option) error {
+func (m *Iterator) Dump(w io.Writer) error {
 	if err := m.Err(); err != nil {
 		return err
 	}
 	key, val := m.Key(), m.Value()
 	bw := bufio.NewWriterSize(w, len("+65536,65536:->\n")+len(key)+len(val))
-	if err := Dump(bw, key, val); err != nil {
+	dump := m.m.dumpFunc()
+	if err := dump(bw, m); err != nil {
 		return err
 	}
 	return bw.Flush()
 }
 
+// DumpKey the given data key in cdbmake format ("+%d:%s\n", len(key), key)
+func DumpKey(bw *bufio.Writer, key []byte) error {
+	_, err := fmt.Fprintf(bw, "+%d:", len(key))
+	if err != nil {
+		return err
+	}
+	if _, err = bw.Write(key); err != nil {
+		return err
+	}
+	return bw.WriteByte('\n')
+}
+
 // Dump the given data key, value pair in cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value)
-func Dump(bw *bufio.Writer, key, val []byte, opts ...Option) error {
+func Dump(bw *bufio.Writer, key, val []byte) error {
 	_, err := fmt.Fprintf(bw, "+%d,%d:", len(key), len(val))
 	if err != nil {
 		return err
@@ -408,27 +449,25 @@ func Dump(bw *bufio.Writer, key, val []byte, opts ...Option) error {
 	if _, err = bw.Write(val); err != nil {
 		return err
 	}
-	if err = bw.WriteByte('\n'); err != nil {
-		return err
-	}
-	return nil
+	return bw.WriteByte('\n')
 }
 
 // Load the Writer from cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
-func (m *Writer) Load(r io.Reader, opts ...Option) error {
+func (m *Writer) Load(r io.Reader) error {
 	return m.LoadContext(context.Background(), r)
 }
 
 // LoadContext the Writer from cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
-func (m *Writer) LoadContext(ctx context.Context, r io.Reader, opts ...Option) error {
+func (m *Writer) LoadContext(ctx context.Context, r io.Reader) error {
 	br := bufio.NewReaderSize(r, 1<<20)
+	parse := m.Config.parseFunc()
 	var key, val []byte
 	for {
 		err := ctx.Err()
 		if err != nil {
 			return err
 		}
-		if key, val, err = Parse(br, key, val); err != nil {
+		if key, val, err = parse(br, key, val); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -441,8 +480,34 @@ func (m *Writer) LoadContext(ctx context.Context, r io.Reader, opts ...Option) e
 	return nil
 }
 
+func (cfg Config) parseFunc() func(br *bufio.Reader, key, val []byte) ([]byte, []byte, error) {
+	if cfg.Simple {
+		if cfg.OnlyKeys {
+			return func(br *bufio.Reader, key, val []byte) ([]byte, []byte, error) {
+				line, err := br.ReadBytes('\n')
+				if len(line) != 0 {
+					line = line[:len(line)-1]
+				}
+				return append(key[:0], line...), val[:0], err
+			}
+		}
+		return func(br *bufio.Reader, key, val []byte) ([]byte, []byte, error) {
+			line, err := br.ReadBytes('\n')
+			if len(line) != 0 {
+				line = line[:len(line)-1]
+			}
+			i := bytes.IndexAny(line, "\t ")
+			if i < 0 {
+				return append(key[:0], line...), val[:0], err
+			}
+			return append(key[:0], line[:i]...), append(val[:0], line[i+1:]...), err
+		}
+	}
+	return Parse
+}
+
 // Parse one key,value pair from the bufio.Reader of cdbmake format ("+%d,%d:%s->%s\n", len(key), len(value), key, value).
-func Parse(br *bufio.Reader, key, val []byte, opts ...Option) ([]byte, []byte, error) {
+func Parse(br *bufio.Reader, key, val []byte) ([]byte, []byte, error) {
 	var keyLen, valLen uint32
 	_, err := fmt.Fscanf(br, "+%d,%d:", &keyLen, &valLen)
 	if err != nil {
@@ -481,22 +546,6 @@ func Parse(br *bufio.Reader, key, val []byte, opts ...Option) ([]byte, []byte, e
 	return key, val, nil
 }
 
-type Option func(*config)
-
-func (cfg *config) Apply(opts ...Option) {
-	for _, o := range opts {
-		o(cfg)
-	}
-}
-
-type config struct {
+type Config struct {
 	OnlyKeys, Simple bool
-}
-
-func OnlyKeys(cfg *config) { cfg.OnlyKeys = true }
-func Simple(cfg *config)   { cfg.Simple = true }
-func makeConfig(opts []Option) config {
-	var cfg config
-	cfg.Apply(opts...)
-	return cfg
 }

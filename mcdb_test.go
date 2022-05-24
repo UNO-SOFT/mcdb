@@ -1,4 +1,4 @@
-// Copyright 2021 Tamás Gulácsi. All rights reserved.
+// Copyright 2021, 2022 Tamás Gulácsi. All rights reserved.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -80,7 +80,7 @@ func TestReadWrite(t *testing.T) {
 	for _, want := range keys {
 		got, err := rw.Get(want)
 		if err != nil {
-			t.Errorf("%q: %w", want, err)
+			t.Errorf("%q: %+v", want, err)
 		}
 		if !bytes.Equal(got, want) {
 			t.Errorf("got %q, wanted %q", got, want)

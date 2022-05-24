@@ -26,7 +26,6 @@ func main() {
 
 func Main() error {
 	var simple, onlyKeys bool
-	opts := make([]mcdb.Option, 0, 2)
 
 	fs := flag.NewFlagSet("dump", flag.ContinueOnError)
 	fs.BoolVar(&onlyKeys, "l", false, "list only the keys")
@@ -37,8 +36,9 @@ func Main() error {
 				return err
 			}
 			defer cr.Close()
+			cr.Config.Simple, cr.Config.OnlyKeys = simple, onlyKeys
 			if len(args) == 1 {
-				return cr.DumpContext(ctx, os.Stdout, opts...)
+				return cr.DumpContext(ctx, os.Stdout)
 			}
 
 			bw := bufio.NewWriter(os.Stdout)
@@ -49,7 +49,7 @@ func Main() error {
 				if err != nil {
 					return fmt.Errorf("%q: %w", k, err)
 				}
-				if err = mcdb.Dump(bw, key, val, opts...); err != nil {
+				if err = mcdb.Dump(bw, key, val); err != nil {
 					return err
 				}
 			}
@@ -66,7 +66,8 @@ func Main() error {
 				return err
 			}
 			defer cw.Close()
-			if err := cw.LoadContext(ctx, os.Stdin, opts...); err != nil {
+			cw.Config.Simple, cw.Config.OnlyKeys = simple, onlyKeys
+			if err := cw.LoadContext(ctx, os.Stdin); err != nil {
 				return err
 			}
 			return cw.Close()
@@ -85,12 +86,6 @@ func Main() error {
 
 	if err := app.Parse(os.Args[1:]); err != nil {
 		return err
-	}
-	if simple {
-		opts = append(opts, mcdb.Simple)
-	}
-	if onlyKeys {
-		opts = append(opts, mcdb.OnlyKeys)
 	}
 	return app.Run(ctx)
 }
