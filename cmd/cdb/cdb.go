@@ -1,4 +1,4 @@
-// Copyright 2021 Tamás Gulácsi. All rights reserved.
+// Copyright 2021, 2022 Tamás Gulácsi. All rights reserved.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -25,7 +25,12 @@ func main() {
 }
 
 func Main() error {
-	dumpCmd := ffcli.Command{Name: "dump",
+	var simple, onlyKeys bool
+	opts := make([]mcdb.Option, 0, 2)
+
+	fs := flag.NewFlagSet("dump", flag.ContinueOnError)
+	fs.BoolVar(&onlyKeys, "l", false, "list only the keys")
+	dumpCmd := ffcli.Command{Name: "dump", FlagSet: fs,
 		Exec: func(ctx context.Context, args []string) error {
 			cr, err := mcdb.NewReader(args[0])
 			if err != nil {
@@ -33,7 +38,7 @@ func Main() error {
 			}
 			defer cr.Close()
 			if len(args) == 1 {
-				return cr.DumpContext(ctx, os.Stdout)
+				return cr.DumpContext(ctx, os.Stdout, opts...)
 			}
 
 			bw := bufio.NewWriter(os.Stdout)
@@ -44,7 +49,7 @@ func Main() error {
 				if err != nil {
 					return fmt.Errorf("%q: %w", k, err)
 				}
-				if err := mcdb.Dump(bw, key, val); err != nil {
+				if err = mcdb.Dump(bw, key, val, opts...); err != nil {
 					return err
 				}
 			}
@@ -52,7 +57,7 @@ func Main() error {
 		},
 	}
 
-	fs := flag.NewFlagSet("make", flag.ContinueOnError)
+	fs = flag.NewFlagSet("make", flag.ContinueOnError)
 	flagMakeCount := fs.Int("tables", 1, "number of tables to create")
 	makeCmd := ffcli.Command{Name: "make", FlagSet: fs,
 		Exec: func(ctx context.Context, args []string) error {
@@ -61,18 +66,31 @@ func Main() error {
 				return err
 			}
 			defer cw.Close()
-			if err := cw.LoadContext(ctx, os.Stdin); err != nil {
+			if err := cw.LoadContext(ctx, os.Stdin, opts...); err != nil {
 				return err
 			}
 			return cw.Close()
 		},
 	}
 
+	fs = flag.NewFlagSet("cdb", flag.ContinueOnError)
+	fs.BoolVar(&simple, "m", false, "simple format (key, whitespace, rest is value till EOL)")
 	app := ffcli.Command{Name: "cdb",
+		FlagSet:     fs,
 		Exec:        dumpCmd.Exec,
 		Subcommands: []*ffcli.Command{&dumpCmd, &makeCmd},
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	return app.ParseAndRun(ctx, os.Args[1:])
+
+	if err := app.Parse(os.Args[1:]); err != nil {
+		return err
+	}
+	if simple {
+		opts = append(opts, mcdb.Simple)
+	}
+	if onlyKeys {
+		opts = append(opts, mcdb.OnlyKeys)
+	}
+	return app.Run(ctx)
 }
