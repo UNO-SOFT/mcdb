@@ -104,11 +104,13 @@ func NewWriter(dir string, n int) (*Writer, error) {
 			_ = m.Close()
 			return nil, err
 		}
-		if m.ws[i].Writer, err = cdb.NewWriter(fh, nil); err != nil {
+		w, err := cdb.NewWriter(fh, nil)
+		if err != nil {
+			_ = fh.Close()
 			_ = m.Close()
 			return nil, err
 		}
-		m.ws[i].fileName = fh.Name()
+		m.ws[i] = cdbWriter{Writer: w, fileName: fh.Name()}
 	}
 	return &m, nil
 }
@@ -249,7 +251,7 @@ func NewReader(dir string) (*Reader, error) {
 			case 1:
 				m.bucketHash, m.cdbHash = fnvHash, nil
 			default:
-				return nil, fmt.Errorf("Unknown version %d", version)
+				return nil, fmt.Errorf("unknown version %d", version)
 			}
 		} else if version != v {
 			return nil, fmt.Errorf("Version mismatch: was %d, now %d (%q)", version, v, de.Name())
