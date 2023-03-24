@@ -53,12 +53,12 @@ func bucket(h HashFunc, key []byte, expC int) int {
 
 // Writer is the writer. It needs the number of tables beforehand.
 type Writer struct {
-	Config
-	ws         []cdbWriter
-	path       string
 	bucketHash HashFunc
+	path       string
+	ws         []cdbWriter
 	expC       int
-	canGrow    bool
+	Config
+	canGrow bool
 }
 
 type cdbWriter struct {
@@ -196,10 +196,10 @@ func (m *Writer) Put(key, val []byte) error {
 
 // Reader is a reader for multiple CDB files.
 type Reader struct {
-	Config
-	rs                  []*cdb.CDB
 	bucketHash, cdbHash HashFunc
+	rs                  []*cdb.CDB
 	expC                int
+	Config
 }
 
 type Version uint8
