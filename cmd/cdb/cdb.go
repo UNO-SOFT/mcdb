@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -20,15 +21,22 @@ import (
 
 func main() {
 	if err := Main(); err != nil {
+		if errors.Is(err, errNotFound) {
+			log.Printf("%+v", err)
+			os.Exit(2)
+		}
 		log.Fatalf("ERROR: %+v\n", err)
 	}
 }
+
+var errNotFound = errors.New("not found")
 
 func Main() error {
 	var simple, onlyKeys bool
 
 	fs := flag.NewFlagSet("dump", flag.ContinueOnError)
 	fs.BoolVar(&onlyKeys, "l", false, "list only the keys")
+	flagQ := fs.Bool("q", false, "quiet - exit with 2 if key not found")
 	dumpCmd := ffcli.Command{Name: "dump", FlagSet: fs,
 		Exec: func(ctx context.Context, args []string) error {
 			cr, err := mcdb.NewReader(args[0])
@@ -48,9 +56,12 @@ func Main() error {
 				val, err := cr.Get(key)
 				if err != nil {
 					return fmt.Errorf("%q: %w", k, err)
-				}
-				if err = mcdb.Dump(bw, key, val); err != nil {
-					return err
+				} else if val != nil {
+					if err = mcdb.Dump(bw, key, val); err != nil {
+						return err
+					}
+				} else if *flagQ {
+					return fmt.Errorf("%q: %w", key, errNotFound)
 				}
 			}
 			return nil
