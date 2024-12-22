@@ -1,4 +1,4 @@
-// Copyright 2021, 2022 Tamás Gulácsi. All rights reserved.
+// Copyright 2021, 2024 Tamás Gulácsi. All rights reserved.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -7,7 +7,7 @@ package main
 import (
 	"bufio"
 	"context"
-	"flag"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,7 +15,8 @@ import (
 	"syscall"
 
 	"github.com/UNO-SOFT/mcdb"
-	"github.com/peterbourgon/ff/v3/ffcli"
+	"github.com/peterbourgon/ff/v4"
+	"github.com/peterbourgon/ff/v4/ffhelp"
 )
 
 func main() {
@@ -27,9 +28,9 @@ func main() {
 func Main() error {
 	var simple, onlyKeys bool
 
-	fs := flag.NewFlagSet("dump", flag.ContinueOnError)
-	fs.BoolVar(&onlyKeys, "l", false, "list only the keys")
-	dumpCmd := ffcli.Command{Name: "dump", FlagSet: fs,
+	FS := ff.NewFlagSet("dump")
+	FS.BoolVar(&onlyKeys, 'l', "list-only", "list only the keys")
+	dumpCmd := ff.Command{Name: "dump", Flags: FS,
 		Exec: func(ctx context.Context, args []string) error {
 			cr, err := mcdb.NewReader(args[0])
 			if err != nil {
@@ -57,9 +58,9 @@ func Main() error {
 		},
 	}
 
-	fs = flag.NewFlagSet("make", flag.ContinueOnError)
-	flagMakeCount := fs.Int("tables", 1, "number of tables to create")
-	makeCmd := ffcli.Command{Name: "make", FlagSet: fs,
+	FS = ff.NewFlagSet("make")
+	flagMakeCount := FS.Int('t', "tables", 1, "number of tables to create")
+	makeCmd := ff.Command{Name: "make", Flags: FS,
 		Exec: func(ctx context.Context, args []string) error {
 			cw, err := mcdb.NewWriter(args[0], *flagMakeCount)
 			if err != nil {
@@ -74,17 +75,20 @@ func Main() error {
 		},
 	}
 
-	fs = flag.NewFlagSet("cdb", flag.ContinueOnError)
-	fs.BoolVar(&simple, "m", false, "simple format (key, whitespace, rest is value till EOL)")
-	app := ffcli.Command{Name: "cdb",
-		FlagSet:     fs,
+	FS = ff.NewFlagSet("cdb")
+	FS.BoolVar(&simple, 'm', "simple", "simple format (key, whitespace, rest is value till EOL)")
+	app := ff.Command{Name: "cdb", Flags: FS,
 		Exec:        dumpCmd.Exec,
-		Subcommands: []*ffcli.Command{&dumpCmd, &makeCmd},
+		Subcommands: []*ff.Command{&dumpCmd, &makeCmd},
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	if err := app.Parse(os.Args[1:]); err != nil {
+		ffhelp.Command(&app).WriteTo(os.Stderr)
+		if errors.Is(err, ff.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	return app.Run(ctx)
