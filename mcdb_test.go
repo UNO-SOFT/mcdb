@@ -30,7 +30,7 @@ func TestGrow(t *testing.T) {
 	var key [1 << 20]byte
 	val := make([]byte, 16<<20)
 
-	for i := 0; i < 10_000; i++ {
+	for i := range 10_000 {
 		_ = strconv.AppendUint(key[:0], uint64(i), 10)
 		if err = cw.Put(key[:], val[:]); err != nil {
 			if strings.Contains(err.Error(), "no space left on device") {

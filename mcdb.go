@@ -31,7 +31,7 @@ import (
 
 type HashFunc func([]byte) uint32
 
-var fnvHashesPool = sync.Pool{New: func() interface{} { return fnv.New32() }}
+var fnvHashesPool = sync.Pool{New: func() any { return fnv.New32() }}
 
 func fnvHash(p []byte) uint32 {
 	hsh := fnvHashesPool.Get().(hash.Hash32)
