@@ -14,14 +14,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-
-	//"log"
 	"hash"
 	"hash/fnv"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -311,6 +310,7 @@ func (m *Reader) Close() error {
 func (m *Reader) Get(key []byte) ([]byte, error) {
 	j := bucket(m.bucketHash, key, m.expC)
 	b, err := m.rs[j].Get(key)
+	// fmt.Printf("MCDB(%s, %d, %t): %+v", key, j, m.TryAll, err)
 	if err == nil || !m.TryAll {
 		return b, err
 	}
@@ -319,6 +319,7 @@ func (m *Reader) Get(key []byte) ([]byte, error) {
 			continue
 		}
 		if b, err2 := r.Get(key); err2 == nil {
+			slog.Warn("Get", "key", string(key), "found", i, "wanted", j)
 			return b, nil
 		}
 	}
