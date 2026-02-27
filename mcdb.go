@@ -309,7 +309,20 @@ func (m *Reader) Close() error {
 
 // Get returns the value for a given key, or nil if it can't be found.
 func (m *Reader) Get(key []byte) ([]byte, error) {
-	return m.rs[bucket(m.bucketHash, key, m.expC)].Get(key)
+	j := bucket(m.bucketHash, key, m.expC)
+	b, err := m.rs[j].Get(key)
+	if err == nil || !m.TryAll {
+		return b, err
+	}
+	for i, r := range m.rs {
+		if i == j {
+			continue
+		}
+		if b, err2 := r.Get(key); err2 == nil {
+			return b, nil
+		}
+	}
+	return b, err
 }
 
 // Iter returns an iterator.
@@ -549,5 +562,5 @@ func Parse(br *bufio.Reader, key, val []byte) ([]byte, []byte, error) {
 }
 
 type Config struct {
-	OnlyKeys, Simple bool
+	OnlyKeys, Simple, TryAll bool
 }
