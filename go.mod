@@ -9,6 +9,8 @@ require (
 	golang.org/x/exp v0.0.0-20250506013437-ce4c2cf36ca6
 )
 
-require github.com/peterbourgon/ff/v4 v4.0.0-alpha.4
+require github.com/peterbourgon/ff/v4 v4.0.0-beta.1
 
 require github.com/davecgh/go-spew v1.1.1 // indirect
+
+replace github.com/peterbourgon/ff/v4 v4.0.0-beta.1 => github.com/UNO-SOFT/ff/v4 v4.0.0-beta.1.us
