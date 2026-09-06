@@ -1,6 +1,6 @@
 // Copyright 2021, 2022 Tamás Gulácsi. All rights reserved.
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: EUPL-1.2
 
 // Package mcdb contains multiple Constant Databases (DJB's cdb),
 // as one cdb can only contain 4GiB maximum.
