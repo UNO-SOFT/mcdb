@@ -14,9 +14,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"flag"
+	"github.com/UNO-SOFT/cli"
 	"github.com/UNO-SOFT/mcdb"
-	"github.com/peterbourgon/ff/v4"
-	"github.com/peterbourgon/ff/v4/ffhelp"
 )
 
 func main() {
@@ -28,10 +28,11 @@ func main() {
 func Main() error {
 	var simple, onlyKeys bool
 
-	FS := ff.NewFlagSet("dump")
-	FS.BoolVar(&onlyKeys, 'l', "list-only", "list only the keys")
-	dumpCmd := ff.Command{Name: "dump", Flags: FS,
-		Exec: func(ctx context.Context, args []string) error {
+	FS := flag.NewFlagSet("dump", flag.ContinueOnError)
+	FS.BoolVar(&onlyKeys, "list-only", false, "list only the keys")
+	dumpCmd := cli.Command{Name: "dump", Flags: FS,
+		Exec: func(ctx context.Context, state *cli.State) error {
+			args := state.Args
 			cr, err := mcdb.NewReader(args[0])
 			if err != nil {
 				return err
@@ -55,13 +56,14 @@ func Main() error {
 				}
 			}
 			return nil
-		},
+		}, FlagConfigs: []cli.FlagConfig{cli.FlagConfig{Name: "list-only", Short: "l"}},
 	}
 
-	FS = ff.NewFlagSet("make")
-	flagMakeCount := FS.Int('t', "tables", 1, "number of tables to create")
-	makeCmd := ff.Command{Name: "make", Flags: FS,
-		Exec: func(ctx context.Context, args []string) error {
+	FS = flag.NewFlagSet("make", flag.ContinueOnError)
+	flagMakeCount := FS.Int("tables", 1, "number of tables to create")
+	makeCmd := cli.Command{Name: "make", Flags: FS,
+		Exec: func(ctx context.Context, state *cli.State) error {
+			args := state.Args
 			cw, err := mcdb.NewWriter(args[0], *flagMakeCount)
 			if err != nil {
 				return err
@@ -72,24 +74,24 @@ func Main() error {
 				return err
 			}
 			return cw.Close()
-		},
+		}, FlagConfigs: []cli.FlagConfig{cli.FlagConfig{Name: "tables", Short: "t"}},
 	}
 
-	FS = ff.NewFlagSet("cdb")
-	FS.BoolVar(&simple, 'm', "simple", "simple format (key, whitespace, rest is value till EOL)")
-	app := ff.Command{Name: "cdb", Flags: FS,
+	FS = flag.NewFlagSet("cdb", flag.ContinueOnError)
+	FS.BoolVar(&simple, "simple", false, "simple format (key, whitespace, rest is value till EOL)")
+	app := cli.Command{Name: "cdb", Flags: FS,
 		Exec:        dumpCmd.Exec,
-		Subcommands: []*ff.Command{&dumpCmd, &makeCmd},
+		SubCommands: []*cli.Command{&dumpCmd, &makeCmd}, FlagConfigs: []cli.FlagConfig{cli.FlagConfig{Name: "simple", Short: "m"}},
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	if err := app.Parse(os.Args[1:]); err != nil {
-		ffhelp.Command(&app).WriteTo(os.Stderr)
-		if errors.Is(err, ff.ErrHelp) {
+	if err := cli.Parse(&app, os.Args[1:]); err != nil {
+		cli.PrintHelp(os.Stderr, &app)
+		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
 		return err
 	}
-	return app.Run(ctx)
+	return cli.Run(ctx, &app, nil)
 }
